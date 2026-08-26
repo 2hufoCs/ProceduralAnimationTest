@@ -3,6 +3,7 @@ using NaughtyAttributes;
 using System.Collections.Generic;
 using System;
 using System.Linq;
+using Unity.VisualScripting;
 using UnityEngine.Splines;
 
 [ExecuteAlways]
@@ -13,9 +14,11 @@ public class WormBodyRenderer : MonoBehaviour
     [Header("Body")]
     [SerializeField, Range(1, 20), OnValueChanged(nameof(RecomputeBody))] private int segmentCount;
     [SerializeField, OnValueChanged(nameof(ReassignSegmentRadiuses))] private List<float> segmentRadiuses = new();
-    [SerializeField] private float baseRadius;
     [SerializeField, OnValueChanged(nameof(RecomputeBody))] private float segmentDistance;
+    private float baseRadius = .4f;
+    
     [SerializeField] private float maxSegmentAngle;
+    [SerializeField, Range(0, 1)] private float lookAtExtremityFactor;
 
     [Header("Meshes")] 
     [SerializeField] private Transform meshParent;
@@ -26,6 +29,7 @@ public class WormBodyRenderer : MonoBehaviour
     [Header("Debug")]
     [SerializeField] private bool debugMode;
     [SerializeField] private Color segmentColor;
+    [SerializeField] private Transform cubeTransform;
 
     [SerializeField] private List<BodySegment> _segments = new();
     private Vector3 _previousFramePos;
@@ -33,7 +37,6 @@ public class WormBodyRenderer : MonoBehaviour
     void OnEnable()
     {
         RecomputeBody();
-        ReassignSegmentRadiuses();
     }
 
     void RecomputeBody()
@@ -63,15 +66,15 @@ public class WormBodyRenderer : MonoBehaviour
         }
 
         ReconstructMeshes();
-
-
+        ReassignSegmentRadiuses();
+        
         //Debug.Log("recomputed body");
     }
 
     void ReconstructMeshes()
     {
         // Destroy previous meshes (even in editor)
-        var tempList = transform.Cast<Transform>().ToList();
+        var tempList = meshParent.Cast<Transform>().ToList();
         foreach(var child in tempList)
         {
             DestroyImmediate(child.gameObject);
@@ -81,7 +84,7 @@ public class WormBodyRenderer : MonoBehaviour
         for (int i = 0; i < segmentCount; i++)
         {
             GameObject meshToInstantiate = i == 0 ? headMesh : i == segmentCount - 1 ? tailMesh: bodyMesh;
-            GameObject newMesh = Instantiate(meshToInstantiate, transform);
+            GameObject newMesh = Instantiate(meshToInstantiate, meshParent);
             newMesh.name = i == 0 ? $"WormHead_{i}" : i == segmentCount - 1 ? $"WormTail_{i}" : $"WormBody_{i}";
                 
             newMesh.transform.position = _segments[i].pos;
@@ -128,7 +131,6 @@ public class WormBodyRenderer : MonoBehaviour
         // Circle constraint each segment
         for (int i = 1; i < segmentCount; i++)
         {
-            Vector3 oldPos = _segments[i].pos;
             Vector3 posDiff = _segments[i].pos - _segments[i - 1].pos;
             Vector3 newPos = _segments[i - 1].pos + posDiff.normalized * segmentDistance;
             
@@ -138,27 +140,35 @@ public class WormBodyRenderer : MonoBehaviour
                 Vector3 v1 = _segments[i - 2].pos - _segments[i - 1].pos;
                 Vector3 v2 = newPos - _segments[i - 1].pos;
                 float angle = Vector3.SignedAngle(v1, v2, Vector3.up);
-                
-                // if (i == segmentCount - 1 && angle < maxSegmentAngle)
-                //     Debug.Log("angle is " + angle);
-                //Debug.Log($"right vector rotated by 135 degrees: {Quaternion.AngleAxis(maxSegmentAngle, Vector3.up) * Vector3.right}");
             
                 if (Mathf.Abs(angle) < maxSegmentAngle)
-                {
-                    //float angleToRotate = (maxSegmentAngle - Mathf.Abs(angle)) * Mathf.Sign(angle);
-                    newPos = v1;
-                    newPos = Quaternion.AngleAxis(maxSegmentAngle * Mathf.Sign(angle), Vector3.up) * newPos + _segments[i - 1].pos;
-                }
+                    newPos = Quaternion.AngleAxis(maxSegmentAngle * Mathf.Sign(angle), Vector3.up) * v1 + _segments[i - 1].pos;
             }
             
             _segments[i].pos = newPos;
             _segments[i].mesh.transform.position = newPos;
             
             // Rotate segment mesh
-            Vector3 deltaPos = newPos - oldPos;
+            float nextSegmentAngle = _segments[i - 1].mesh.transform.eulerAngles.y;
+            Vector3 nextExtremity = Quaternion.AngleAxis(nextSegmentAngle - 90, Vector3.up) * Vector3.left * .5f + _segments[i - 1].pos;
+            Vector3 lookAtPos = Lerp(_segments[i - 1].pos, nextExtremity, lookAtExtremityFactor);
+            // if (i == 1)
+            //     cubeTransform.position = nextExtremity;
+            
+            Vector3 deltaPos = lookAtPos - newPos;
             float meshAngle = Vector3.SignedAngle(Vector3.right, deltaPos, Vector3.up);
             _segments[i].mesh.transform.localEulerAngles = new Vector3(0,  meshAngle + 90, 0);
+            
+            // Scale to fill gaps
+            float angleDiff = Vector3.Angle(_segments[i].mesh.transform.forward, _segments[i - 1].mesh.transform.forward);
+            float scaleFactor = Mathf.Lerp(1, 1.35f, angleDiff / 45f);
+            _segments[i].mesh.transform.localScale = new Vector3(_segments[i].mesh.transform.localScale.x, _segments[i].mesh.transform.localScale.y, .5f * scaleFactor);
         }
+    }
+
+    Vector3 Lerp(Vector3 v1, Vector3 v2, float t)
+    {
+        return new Vector3(v1.x + (v2.x - v1.x) * t, v1.y + (v2.y - v1.y) * t, v1.z + (v2.z - v1.z) * t);
     }
 
     void OnDrawGizmos()
