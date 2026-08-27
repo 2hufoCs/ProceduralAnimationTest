@@ -191,5 +191,4 @@ public class BodySegment
     public GameObject mesh;
     
     public BodySegment parentSegment;
-    
 }
