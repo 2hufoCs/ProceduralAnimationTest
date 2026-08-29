@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using NaughtyAttributes;
 using System.Linq;
 using System.Collections;
+using UnityEngine.Splines;
 using System;
 
 [ExecuteAlways]
@@ -15,6 +16,8 @@ public class IKLegs : MonoBehaviour
     [SerializeField, Range(1, 100), OnValueChanged(nameof(RecomputeLegs))] private int segmentCountPerLeg;
 
     [SerializeField] private List<bool> legDirections = new();
+    [SerializeField] private List<Transform> stepEndPositions = new();
+    [SerializeField] private Transform stepEndPosParent;
     [SerializeField] private int maxIKFabrikDepth;
     
     [Header("Segments")]
@@ -68,6 +71,8 @@ public class IKLegs : MonoBehaviour
                 
                 newSegment.pos = new Vector3(-i * segmentDistance, 0) + legBases[j].position;
                 newSegment.radius = segmentRadiuses[i];
+                newSegment.mirrored = j % 2 == 0;
+                newSegment.forward = legDirections[j];
             }
         }
 
@@ -80,11 +85,15 @@ public class IKLegs : MonoBehaviour
     void ResizeLists()
     {
         // Remove overhead or add leg directions
-        while (legDirections.Count != legCount)
+        while (legDirections.Count != legCount || stepEndPositions.Count != legCount)
         {
             if (legDirections.Count < legCount)
                 legDirections.Add(true);
             else legDirections.Remove(legDirections[^1]);
+            
+            if (stepEndPositions.Count < legCount)
+                stepEndPositions.Add(transform);
+            else stepEndPositions.Remove(stepEndPositions[^1]);
         }
         
         // Remove overhead or add segment radiuses 
@@ -150,20 +159,19 @@ public class IKLegs : MonoBehaviour
     void Update()
     {
         if (!simulate) return;
-        //_previousFramePos = _segments[0].pos;
-        
         if (_segments[0] == null)
             Debug.LogError($"leg named {gameObject.name} has no segments");
         
-        // foreach (List<LegSegment> legSegments in _segments)
-        //     MoveLegFK(legSegments, baseAnchored);
+        RotateStepEndPos();
         
-        MoveFabrikIK();
+        foreach (List<LegSegment> legSegments in _segments)
+            MoveFabrikIK(legSegments);
+        //MoveFabrikIK(_segments[1]);
     }
     
-    void MoveFabrikIK()
+    void MoveFabrikIK(List<LegSegment> legSegments)
     {
-        List<LegSegment> legSegments = _segments[0];
+        // List<LegSegment> legSegments = _segments[0];
         bool isBaseAnchored = false;
         
         Debug.Log("starting IK Fabrik algorithm");
@@ -171,7 +179,6 @@ public class IKLegs : MonoBehaviour
         {
             MoveLegFK(legSegments, isBaseAnchored);
             isBaseAnchored = !isBaseAnchored;
-            //yield return new WaitForSeconds(.4f);
         }
         Debug.Log("finished IK Fabrik algorithm");
     }
@@ -195,21 +202,47 @@ public class IKLegs : MonoBehaviour
             Vector3 posDiff = legSegments[i].pos - parentSeg.pos;
             Vector3 newPos = parentSeg.pos + posDiff.normalized * segmentDistance;
             
-            // If angle too small, clamp it 
             bool angleCheckCondition = isBaseAnchored ? i > 1 : i < segmentCountPerLeg - 2;
             if (angleCheckCondition)
             {
                 LegSegment parentSeg2 = legSegments[isBaseAnchored ? i - 2 : i + 2];
                 
+                // Check neighboring segments and calculate angle
                 Vector3 v1 = parentSeg2.pos - parentSeg.pos;
                 Vector3 v2 = newPos - parentSeg.pos;
                 float angle = Vector3.SignedAngle(v1, v2, Vector3.up);
+
+                if (isBaseAnchored)
+                {
+                    DrawArrow.ForDebug(parentSeg.pos, v1, Color.red);
+                    DrawArrow.ForDebug(parentSeg.pos, v2, Color.blue);
+                }
+
             
+                // Clamp angle
                 if (Mathf.Abs(angle) < maxSegmentAngle)
                     newPos = Quaternion.AngleAxis(maxSegmentAngle * Mathf.Sign(angle), Vector3.up) * v1 + parentSeg.pos;
+                
+                // Rotate legs depending on forward/backward
+                bool positiveAngle = Mathf.Sign(angle) < .01;
+                bool rotateLegSegment;
+                
+                if ((legSegments[i].forward && legSegments[i].mirrored) || (!legSegments[i].forward && !legSegments[i].mirrored))
+                    rotateLegSegment = isBaseAnchored && !positiveAngle || !isBaseAnchored && positiveAngle;
+                else
+                    rotateLegSegment = isBaseAnchored && positiveAngle || !isBaseAnchored && !positiveAngle;
+                
+                if (rotateLegSegment)
+                {
+                    // Step 1: calculate angle diff
+                    float deltaAngle = Vector3.SignedAngle((parentSeg.pos - newPos).normalized, (parentSeg2.pos - newPos).normalized, Vector3.up);
+                    parentSeg.pos = newPos + Quaternion.AngleAxis(deltaAngle * 2, Vector3.up) * (parentSeg.pos - newPos);
+                }
             }
             
             legSegments[i].pos = newPos;
+            
+            
             //_segments[i].mesh.transform.position = newPos;
             
             // Rotate segment mesh
@@ -233,6 +266,18 @@ public class IKLegs : MonoBehaviour
         //     legBases[legIndex].position = legSegments[0].pos;
         
     }
+
+
+    void RotateStepEndPos()
+    {
+        SplineAnimate splineAnim = GetComponent<SplineAnimate>();
+        float time = splineAnim.NormalizedTime;
+        Vector3 tangent = splineAnim.Container.Splines[0].EvaluateTangent(time);
+        
+        float headAngle = Vector3.SignedAngle(Vector3.right, tangent, Vector3.up);
+        stepEndPosParent.transform.localEulerAngles = new Vector3(0, headAngle, 0);
+    }
+    
     
     #endregion Looping
 
@@ -247,6 +292,8 @@ public class IKLegs : MonoBehaviour
 
         foreach (List<LegSegment> legSegments in _segments)
         {
+            Gizmos.color = Color.blue;
+            Gizmos.DrawSphere(stepEndPositions[_segments.IndexOf(legSegments)].position, .3f);
             foreach (LegSegment segment in legSegments)
             {
                 Gizmos.color = segmentColor;
@@ -261,5 +308,7 @@ public class LegSegment
 {
     public Vector3 pos;
     public float radius;
+    
     public bool forward;
+    public bool mirrored;
 }
