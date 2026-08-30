@@ -65,6 +65,7 @@ public class WormBodyRenderer : MonoBehaviour
             newSegment.radius = segmentRadiuses[i];
         }
 
+        Debug.Log("supposed to reconstruct meshes");
         ReconstructMeshes();
         ReassignSegmentRadiuses();
         
@@ -74,11 +75,47 @@ public class WormBodyRenderer : MonoBehaviour
     void ReconstructMeshes()
     {
         // Destroy previous meshes (even in editor)
-        var tempList = meshParent.Cast<Transform>().ToList();
-        foreach(var child in tempList)
+
+        
+        // Debug.Log($"number of meshes: {childList.Count}, segment count:  {segmentCount}");
+        // while (childList.Count != segmentCount)
+        // {
+        //     if (_segments.Count > segmentCount)
+        //     {
+        //         DestroyImmediate(childList[^1]);
+        //         childList = meshParent.Cast<Transform>().ToList();
+        //         continue;
+        //     }
+        //     
+        //     
+        // }
+        Dictionary<int, List<Transform>> childrenToReassign = new();
+        var childList = meshParent.Cast<Transform>().ToList();
+        
+        for (int i = 0; i < childList.Count; i++)
         {
+            Transform child = childList[i];
+            var subChildren = child.Cast<Transform>().ToList();
+            List<Transform> subChildList = new();
+            
+            foreach(var subChild in subChildren)
+            {
+                if (subChild.name.Contains("LegsPivot"))
+                {
+                    Debug.Log("prevented destroy of legs");
+                    subChild.parent = transform;
+                    subChildList.Add(subChild);
+                    
+                    subChild.localPosition = Vector3.zero;
+                    subChild.localRotation = Quaternion.identity;
+                    subChild.localScale = Vector3.one;
+                }
+            }
+            childrenToReassign.Add(i, subChildList);
+
             DestroyImmediate(child.gameObject);
         }
+        
         
         // Spawn new meshes
         for (int i = 0; i < segmentCount; i++)
@@ -89,6 +126,14 @@ public class WormBodyRenderer : MonoBehaviour
                 
             newMesh.transform.position = _segments[i].pos;
             _segments[i].mesh = newMesh;
+
+            if (childrenToReassign.TryGetValue(i, out List<Transform> children))
+            {
+                foreach (Transform child in children)
+                {
+                    child.parent = newMesh.transform;
+                }
+            }
         }
     }
 

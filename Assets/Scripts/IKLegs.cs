@@ -10,6 +10,7 @@ using System;
 public class IKLegs : MonoBehaviour
 {
     [SerializeField] private bool simulate = true;
+    [SerializeField] private bool ikEditMode;
 
     [Header("Legs")] 
     [SerializeField, OnValueChanged(nameof(RecomputeLegs))] private int legCount;
@@ -17,7 +18,6 @@ public class IKLegs : MonoBehaviour
 
     [SerializeField] private List<bool> legDirections = new();
     [SerializeField] private List<Transform> stepEndPositions = new();
-    [SerializeField] private Transform stepEndPosParent;
     [SerializeField] private int maxIKFabrikDepth;
     
     [Header("Segments")]
@@ -80,6 +80,9 @@ public class IKLegs : MonoBehaviour
         ReassignSegmentRadiuses();
         
         //Debug.Log("recomputed body");
+        
+        // foreach (List<LegSegment> legSegments in _segments)
+        //     MoveLegFK(legSegments, true);
     }
 
     void ResizeLists()
@@ -162,10 +165,18 @@ public class IKLegs : MonoBehaviour
         if (_segments[0] == null)
             Debug.LogError($"leg named {gameObject.name} has no segments");
         
-        RotateStepEndPos();
-        
-        foreach (List<LegSegment> legSegments in _segments)
-            MoveFabrikIK(legSegments);
+        //RotateStepEndPos();
+
+        if (ikEditMode)
+        {
+            foreach (List<LegSegment> legSegments in _segments)
+                MoveFabrikIK(legSegments);
+        }
+        else
+        {
+            foreach (List<LegSegment> legSegments in _segments)
+                MoveLegFK(legSegments, true);
+        }
         //MoveFabrikIK(_segments[1]);
     }
     
@@ -184,7 +195,7 @@ public class IKLegs : MonoBehaviour
     }
 
     /// <summary>
-    /// Makes the leg follow one extremity
+    /// Makes the leg follow one extremity (base or paw)
     /// </summary>
     void MoveLegFK(List<LegSegment> legSegments, bool isBaseAnchored)
     {
@@ -234,7 +245,7 @@ public class IKLegs : MonoBehaviour
                 
                 if (rotateLegSegment)
                 {
-                    // Step 1: calculate angle diff
+                    // Step 1: calculate angle dif
                     float deltaAngle = Vector3.SignedAngle((parentSeg.pos - newPos).normalized, (parentSeg2.pos - newPos).normalized, Vector3.up);
                     parentSeg.pos = newPos + Quaternion.AngleAxis(deltaAngle * 2, Vector3.up) * (parentSeg.pos - newPos);
                 }
@@ -268,15 +279,15 @@ public class IKLegs : MonoBehaviour
     }
 
 
-    void RotateStepEndPos()
-    {
-        SplineAnimate splineAnim = GetComponent<SplineAnimate>();
-        float time = splineAnim.NormalizedTime;
-        Vector3 tangent = splineAnim.Container.Splines[0].EvaluateTangent(time);
-        
-        float headAngle = Vector3.SignedAngle(Vector3.right, tangent, Vector3.up);
-        stepEndPosParent.transform.localEulerAngles = new Vector3(0, headAngle, 0);
-    }
+    // void RotateStepEndPos()
+    // {
+    //     SplineAnimate splineAnim = GetComponent<SplineAnimate>();
+    //     float time = splineAnim.NormalizedTime;
+    //     Vector3 tangent = splineAnim.Container.Splines[0].EvaluateTangent(time);
+    //     
+    //     float headAngle = Vector3.SignedAngle(Vector3.right, tangent, Vector3.up);
+    //     stepEndPosParent.transform.localEulerAngles = new Vector3(0, headAngle, 0);
+    // }
     
     
     #endregion Looping
