@@ -5,6 +5,7 @@ using System.Linq;
 using System.Collections;
 using UnityEngine.Splines;
 using System;
+using DG.Tweening;
 
 [ExecuteAlways]
 public class IKLegs : MonoBehaviour
@@ -18,6 +19,7 @@ public class IKLegs : MonoBehaviour
 
     [SerializeField] private List<bool> legDirections = new();
     [SerializeField] private List<Transform> stepEndPositions = new();
+    [SerializeField] private List<Transform> stepBeginPositions = new();
     [SerializeField] private int maxIKFabrikDepth;
     
     [Header("Segments")]
@@ -29,6 +31,9 @@ public class IKLegs : MonoBehaviour
     [SerializeField] private List<Transform> legBases = new();
     [SerializeField] private List<Transform> legPaws = new();
     private float baseRadius = .2f;
+
+    private float minStepCooldown = .2f;
+    private float[] minStepCooldownTimers;
 
     // [Header("Meshes")] 
     // [SerializeField] private Transform meshParent;
@@ -87,8 +92,10 @@ public class IKLegs : MonoBehaviour
 
     void ResizeLists()
     {
+        minStepCooldownTimers = new float[legCount];
+        
         // Remove overhead or add leg directions
-        while (legDirections.Count != legCount || stepEndPositions.Count != legCount)
+        while (legDirections.Count != legCount || stepEndPositions.Count != legCount || stepBeginPositions.Count != legCount)
         {
             if (legDirections.Count < legCount)
                 legDirections.Add(true);
@@ -97,6 +104,10 @@ public class IKLegs : MonoBehaviour
             if (stepEndPositions.Count < legCount)
                 stepEndPositions.Add(transform);
             else stepEndPositions.Remove(stepEndPositions[^1]);
+            
+            if (stepBeginPositions.Count < legCount)
+                stepBeginPositions.Add(transform);
+            else  stepBeginPositions.Remove(stepBeginPositions[^1]);
         }
         
         // Remove overhead or add segment radiuses 
@@ -165,45 +176,96 @@ public class IKLegs : MonoBehaviour
         if (_segments[0] == null)
             Debug.LogError($"leg named {gameObject.name} has no segments");
         
-        //RotateStepEndPos();
-
+        for (int i = 0; i < legCount; i++)
+            minStepCooldownTimers[i] += Time.deltaTime;
+        
         if (ikEditMode)
         {
             foreach (List<LegSegment> legSegments in _segments)
-                MoveFabrikIK(legSegments);
+                StartCoroutine(MoveFabrikIK(legSegments));
         }
         else
         {
             foreach (List<LegSegment> legSegments in _segments)
-                MoveLegFK(legSegments, true);
+            {
+                Debug.Log("surely ik mode is finished right??? " + legSegments[^1].ikMode);
+                if (legSegments[^1].ikMode)
+                    StartCoroutine(MoveFabrikIK(legSegments));
+                else MoveLegFK(legSegments, true, false);
+            }
         }
-        //MoveFabrikIK(_segments[1]);
     }
     
-    void MoveFabrikIK(List<LegSegment> legSegments)
+    IEnumerator MoveFabrikIK(List<LegSegment> legSegments)
     {
-        // List<LegSegment> legSegments = _segments[0];
         bool isBaseAnchored = false;
+        LegSegment pawSeg = legSegments[^1];
+        pawSeg.ikMode = false;
+        int legIndex = _segments.IndexOf(legSegments);
         
-        Debug.Log("starting IK Fabrik algorithm");
+        Vector3 startPawPos = pawSeg.pos;
+        Vector3 targetPawPos = stepEndPositions[legIndex].position;
+        
+        for (float timer = 0; timer < minStepCooldown - .03f; timer += Time.deltaTime)
+        {
+            Vector3 currentPos = Lerp(startPawPos, targetPawPos, timer /  minStepCooldown);
+            legPaws[legIndex].position = currentPos;
+            
+            for (int depth = 0; depth < maxIKFabrikDepth; depth++)
+            {
+                MoveLegFK(legSegments, isBaseAnchored, true);
+                isBaseAnchored = !isBaseAnchored;
+            }
+
+            yield return null;
+        }
+        
+        legPaws[legIndex].position = targetPawPos;
         for (int depth = 0; depth < maxIKFabrikDepth; depth++)
         {
-            MoveLegFK(legSegments, isBaseAnchored);
+            MoveLegFK(legSegments, isBaseAnchored, true);
             isBaseAnchored = !isBaseAnchored;
         }
-        Debug.Log("finished IK Fabrik algorithm");
     }
 
     /// <summary>
     /// Makes the leg follow one extremity (base or paw)
     /// </summary>
-    void MoveLegFK(List<LegSegment> legSegments, bool isBaseAnchored)
+    void MoveLegFK(List<LegSegment> legSegments, bool isBaseAnchored, bool executingFabrik)
     {
         int legIndex = _segments.IndexOf(legSegments);
         if (isBaseAnchored)
             legSegments[0].pos = legBases[legIndex].position;
         else
             legSegments[^1].pos = legPaws[legIndex].position;
+        
+        DrawArrow.ForDebug(stepEndPositions[legIndex].position, legSegments[^1].pos - stepEndPositions[legIndex].position, Color.green);
+        DrawArrow.ForDebug(stepEndPositions[legIndex].position, stepBeginPositions[legIndex].position - stepEndPositions[legIndex].position, Color.green);
+        
+        // Steps condition
+        if (!executingFabrik)
+        {
+            // Instead of calculating angle, compare distance between endStepPos/pawPos and endStepPos/beginStepPos
+            Vector3 pawSeg = legSegments[^1].pos;
+            float pawDist = (pawSeg - stepEndPositions[legIndex].position).magnitude;
+            float maxPawDist = (stepBeginPositions[legIndex].position - stepEndPositions[legIndex].position).magnitude;
+            
+            // If leg stretched, take a step
+            if (pawDist > maxPawDist && minStepCooldownTimers[legIndex] >= minStepCooldown)
+            {
+                Debug.Log("made a step");
+                minStepCooldownTimers[legIndex] = 0;
+                legSegments[^1].ikMode = true;
+                // DOTween.Sequence()
+                //     .Append(DOTween.To(() => legPaws[legIndex].position, x => legPaws[legIndex].position = x, stepEndPositions[legIndex].position, .1f))
+                //     .OnComplete(() =>
+                //     {
+                //         legSegments[^1].ikMode = false;
+                //         Debug.Log("finished step hopefully");
+                //     });
+                return;
+            }
+        }
         
         // Circle constraint each segment
         for (int i = isBaseAnchored ? 1 : segmentCountPerLeg - 2; isBaseAnchored ? i < segmentCountPerLeg: i >= 0; i += isBaseAnchored ? 1 : -1)
@@ -222,12 +284,6 @@ public class IKLegs : MonoBehaviour
                 Vector3 v1 = parentSeg2.pos - parentSeg.pos;
                 Vector3 v2 = newPos - parentSeg.pos;
                 float angle = Vector3.SignedAngle(v1, v2, Vector3.up);
-
-                if (isBaseAnchored)
-                {
-                    DrawArrow.ForDebug(parentSeg.pos, v1, Color.red);
-                    DrawArrow.ForDebug(parentSeg.pos, v2, Color.blue);
-                }
 
             
                 // Clamp angle
@@ -305,6 +361,8 @@ public class IKLegs : MonoBehaviour
         {
             Gizmos.color = Color.blue;
             Gizmos.DrawSphere(stepEndPositions[_segments.IndexOf(legSegments)].position, .3f);
+            Gizmos.color = Color.green;
+            Gizmos.DrawSphere(stepBeginPositions[_segments.IndexOf(legSegments)].position, .2f);
             foreach (LegSegment segment in legSegments)
             {
                 Gizmos.color = segmentColor;
@@ -322,4 +380,5 @@ public class LegSegment
     
     public bool forward;
     public bool mirrored;
+    public bool ikMode;
 }

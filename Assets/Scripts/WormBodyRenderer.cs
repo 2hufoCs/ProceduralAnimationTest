@@ -65,7 +65,6 @@ public class WormBodyRenderer : MonoBehaviour
             newSegment.radius = segmentRadiuses[i];
         }
 
-        Debug.Log("supposed to reconstruct meshes");
         ReconstructMeshes();
         ReassignSegmentRadiuses();
         
@@ -102,7 +101,6 @@ public class WormBodyRenderer : MonoBehaviour
             {
                 if (subChild.name.Contains("LegsPivot"))
                 {
-                    Debug.Log("prevented destroy of legs");
                     subChild.parent = transform;
                     subChildList.Add(subChild);
                     
@@ -117,7 +115,7 @@ public class WormBodyRenderer : MonoBehaviour
         }
         
         
-        // Spawn new meshes
+        // Spawn new mesh
         for (int i = 0; i < segmentCount; i++)
         {
             GameObject meshToInstantiate = i == 0 ? headMesh : i == segmentCount - 1 ? tailMesh: bodyMesh;
@@ -132,6 +130,10 @@ public class WormBodyRenderer : MonoBehaviour
                 foreach (Transform child in children)
                 {
                     child.parent = newMesh.transform;
+                    
+                    child.localPosition = Vector3.zero;
+                    child.localRotation = Quaternion.identity;
+                    child.localScale = Vector3.one;
                 }
             }
         }
