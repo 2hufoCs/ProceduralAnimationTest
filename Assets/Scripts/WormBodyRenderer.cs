@@ -20,6 +20,11 @@ public class WormBodyRenderer : MonoBehaviour
     [SerializeField] private float maxSegmentAngle;
     [SerializeField, Range(0, 1)] private float lookAtExtremityFactor;
 
+    [Header("Torque")] 
+    [SerializeField] private float torqueAmount;
+    [SerializeField, Range(0.1f, 1)] private float torqueTransferCutoff;
+    [SerializeField] private int maxTorqueSegments;
+
     [Header("Meshes")] 
     [SerializeField] private Transform meshParent;
     [SerializeField] private GameObject headMesh;
@@ -34,8 +39,17 @@ public class WormBodyRenderer : MonoBehaviour
     [SerializeField] private List<BodySegment> _segments = new();
     private Vector3 _previousFramePos;
 
+    private IKLegs _legs;
+    private bool _hasLegs;
+
     void OnEnable()
     {
+        if (TryGetComponent(out IKLegs legs))
+        {
+            _legs = legs;
+            _hasLegs = true;
+        }
+        
         RecomputeBody();
     }
 
@@ -73,21 +87,6 @@ public class WormBodyRenderer : MonoBehaviour
 
     void ReconstructMeshes()
     {
-        // Destroy previous meshes (even in editor)
-
-        
-        // Debug.Log($"number of meshes: {childList.Count}, segment count:  {segmentCount}");
-        // while (childList.Count != segmentCount)
-        // {
-        //     if (_segments.Count > segmentCount)
-        //     {
-        //         DestroyImmediate(childList[^1]);
-        //         childList = meshParent.Cast<Transform>().ToList();
-        //         continue;
-        //     }
-        //     
-        //     
-        // }
         Dictionary<int, List<Transform>> childrenToReassign = new();
         var childList = meshParent.Cast<Transform>().ToList();
         
@@ -194,23 +193,69 @@ public class WormBodyRenderer : MonoBehaviour
             
             _segments[i].pos = newPos;
             _segments[i].mesh.transform.position = newPos;
+
+            // Apply torque if segment has an associated leg taking a step
+            if (_hasLegs)
+            {
+                for (int j = 0; j < _legs.legCount; j++)
+                {
+                    if (_legs.legBases[j].parent.parent == _segments[i].mesh.transform &&
+                        _legs.segments[j][^1].takingStep)
+                    {
+                        ApplyTorque(i, newPos, j);
+                        break;
+                    }
+                }
+            }
             
-            // Rotate segment mesh
-            float nextSegmentAngle = _segments[i - 1].mesh.transform.eulerAngles.y;
-            Vector3 nextExtremity = Quaternion.AngleAxis(nextSegmentAngle - 90, Vector3.up) * Vector3.left * .5f + _segments[i - 1].pos;
-            Vector3 lookAtPos = Lerp(_segments[i - 1].pos, nextExtremity, lookAtExtremityFactor);
-            // if (i == 1)
-            //     cubeTransform.position = nextExtremity;
-            
-            Vector3 deltaPos = lookAtPos - newPos;
-            float meshAngle = Vector3.SignedAngle(Vector3.right, deltaPos, Vector3.up);
-            _segments[i].mesh.transform.localEulerAngles = new Vector3(0,  meshAngle + 90, 0);
-            
-            // Scale to fill gaps
-            float angleDiff = Vector3.Angle(_segments[i].mesh.transform.forward, _segments[i - 1].mesh.transform.forward);
-            float scaleFactor = Mathf.Lerp(1, 1.35f, angleDiff / 45f);
-            _segments[i].mesh.transform.localScale = new Vector3(_segments[i].mesh.transform.localScale.x, _segments[i].mesh.transform.localScale.y, .5f * scaleFactor);
+            RotateMesh(_segments[i].pos, i);
         }
+    }
+
+    void ApplyTorque(int segmentIndex, Vector3 initialPos, int legIndex, float forceCoef = 1, int depth = 0)
+    {
+        if (depth >= maxTorqueSegments) return;
+        
+        if (legIndex == 0)
+            Debug.Log($"now rotating segment n°{segmentIndex}, with strength {forceCoef}");
+        
+        // Get torque 
+        bool rotateClockwise = legIndex % 2 == 0;
+        float angleToRotate = torqueAmount * Time.deltaTime * forceCoef * (rotateClockwise ? 1 : -1);
+        if (_legs.stepDuration > 0)
+            angleToRotate /= _legs.stepDuration;
+        
+        Vector3 parentToCurrent = initialPos - _segments[segmentIndex - 1].pos;
+        _segments[segmentIndex].pos = Quaternion.AngleAxis(angleToRotate, Vector3.up) * parentToCurrent + _segments[segmentIndex - 1].pos;
+        
+        float newForceCoef = forceCoef - torqueTransferCutoff;
+        segmentIndex++;
+        
+        // Base case: top recursion
+        if (newForceCoef <= 0 || segmentIndex >= segmentCount)
+            return;
+        
+        // Continue rotating rest of body with less torque
+        ApplyTorque(segmentIndex, _segments[segmentIndex].pos, legIndex, newForceCoef, depth + 1);
+    }
+
+    void RotateMesh(Vector3 newPos, int i)
+    {
+        // Rotate segment mesh
+        float nextSegmentAngle = _segments[i - 1].mesh.transform.eulerAngles.y;
+        Vector3 nextExtremity = Quaternion.AngleAxis(nextSegmentAngle - 90, Vector3.up) * Vector3.left * .5f + _segments[i - 1].pos;
+        Vector3 lookAtPos = Lerp(_segments[i - 1].pos, nextExtremity, lookAtExtremityFactor);
+        // if (i == 1)
+        //     cubeTransform.position = nextExtremity;
+            
+        Vector3 deltaPos = lookAtPos - newPos;
+        float meshAngle = Vector3.SignedAngle(Vector3.right, deltaPos, Vector3.up);
+        _segments[i].mesh.transform.localEulerAngles = new Vector3(0,  meshAngle + 90, 0);
+            
+        // Scale to fill gaps
+        float angleDiff = Vector3.Angle(_segments[i].mesh.transform.forward, _segments[i - 1].mesh.transform.forward);
+        float scaleFactor = Mathf.Lerp(1, 1.35f, angleDiff / 45f);
+        _segments[i].mesh.transform.localScale = new Vector3(_segments[i].mesh.transform.localScale.x, _segments[i].mesh.transform.localScale.y, .5f * scaleFactor);
     }
 
     Vector3 Lerp(Vector3 v1, Vector3 v2, float t)

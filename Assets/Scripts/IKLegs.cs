@@ -14,7 +14,7 @@ public class IKLegs : MonoBehaviour
     [SerializeField] private bool ikEditMode;
 
     [Header("Legs")] 
-    [SerializeField, OnValueChanged(nameof(RecomputeLegs))] private int legCount;
+    [OnValueChanged(nameof(RecomputeLegs))] public int legCount;
     [SerializeField, Range(1, 100), OnValueChanged(nameof(RecomputeLegs))] private int segmentCountPerLeg;
 
     [SerializeField] private List<bool> legDirections = new();
@@ -28,12 +28,11 @@ public class IKLegs : MonoBehaviour
     [SerializeField, Range(0, 1)] private float lookAtExtremityFactor;
     
     [SerializeField, OnValueChanged(nameof(ReassignSegmentRadiuses))] private List<float> segmentRadiuses = new();
-    [SerializeField] private List<Transform> legBases = new();
+    public List<Transform> legBases = new();
     [SerializeField] private List<Transform> legPaws = new();
     private float baseRadius = .2f;
 
-    private float minStepCooldown = .2f;
-    private float[] minStepCooldownTimers;
+    public float stepDuration;
 
     // [Header("Meshes")] 
     // [SerializeField] private Transform meshParent;
@@ -47,7 +46,7 @@ public class IKLegs : MonoBehaviour
     [SerializeField] private Color segmentColor;
     [SerializeField] private Transform cubeTransform;
 
-    [SerializeField] private List<List<LegSegment>> _segments = new();
+    public List<List<LegSegment>> segments = new();
     private Vector3 _previousFramePos;
     
     
@@ -62,17 +61,17 @@ public class IKLegs : MonoBehaviour
     {
         if (!simulate) return;
         
-        _segments.Clear();
+        segments.Clear();
         ResizeLists();
         
         // Modify segment attributes
         for (int j = 0; j < legCount; j++)
         {
-            _segments.Add(new List<LegSegment>());
+            segments.Add(new List<LegSegment>());
             for (int i = 0; i < segmentCountPerLeg; i++)
             {
                 LegSegment newSegment = new LegSegment();
-                _segments[j].Add(newSegment);
+                segments[j].Add(newSegment);
                 
                 newSegment.pos = new Vector3(-i * segmentDistance, 0) + legBases[j].position;
                 newSegment.radius = segmentRadiuses[i];
@@ -86,14 +85,12 @@ public class IKLegs : MonoBehaviour
         
         //Debug.Log("recomputed body");
         
-        // foreach (List<LegSegment> legSegments in _segments)
+        // foreach (List<LegSegment> legSegments in segments)
         //     MoveLegFK(legSegments, true);
     }
 
     void ResizeLists()
     {
-        minStepCooldownTimers = new float[legCount];
-        
         // Remove overhead or add leg directions
         while (legDirections.Count != legCount || stepEndPositions.Count != legCount || stepBeginPositions.Count != legCount)
         {
@@ -130,6 +127,34 @@ public class IKLegs : MonoBehaviour
                 legPaws.Add(transform);
             else legPaws.Remove(legPaws[^1]);
         }
+
+        // stepBeginStartLocalPos.Clear();
+        // for (int i = 0; i < legCount; i++)
+        // {
+        //     // 1. Set parent to pivot
+        //     Transform t = stepBeginPositions[i];
+        //     Vector3 pos = t.position;
+        //     Debug.Log("position before removing: " + t.localPosition);
+        //     t.parent = legBases[i].parent;
+        //     
+        //     // 2. Store local position
+        //     t.position = pos;
+        //     //stepBeginStartLocalPos.Add(t.localPosition);
+        //     
+        //     // TODO: remove hardcoded values once this system work
+        //     Vector3 localPos = new Vector3((i % 2 == 0) ? -3 : 3, 0, -1.8f);
+        //     if (i >= 2) localPos.x *= 1.5f;
+        //     stepBeginStartLocalPos.Add(localPos);
+        //     t.localPosition = localPos;
+        //     Debug.Log("local position assigning pivot as parent: " + t.localPosition);
+        //     
+        //     // 3. Reset parent to snake transform
+        //     t.parent = transform;
+        //     //t.position = pos;
+        //     t.localRotation = Quaternion.identity;
+        //     t.localScale = Vector3.one;
+        //     Debug.Log("position after reassigning snake parent: " + t.localPosition);
+        // }
     }
 
     void ReassignSegmentRadiuses()
@@ -138,8 +163,8 @@ public class IKLegs : MonoBehaviour
         {
             for (int i = 0; i < segmentCountPerLeg; i++)
             {
-                _segments[j][i].radius = segmentRadiuses[i];
-                //_segments[i].mesh.transform.localScale = new Vector3(segmentRadiuses[i], segmentRadiuses[i], .5f);
+                segments[j][i].radius = segmentRadiuses[i];
+                //segments[i].mesh.transform.localScale = new Vector3(segmentRadiuses[i], segmentRadiuses[i], .5f);
             }
         }
     }
@@ -160,8 +185,8 @@ public class IKLegs : MonoBehaviour
     //         GameObject newMesh = Instantiate(meshToInstantiate, meshParent);
     //         newMesh.name = i == 0 ? $"WormHead_{i}" : i == segmentCount - 1 ? $"WormTail_{i}" : $"WormBody_{i}";
     //             
-    //         newMesh.transform.position = _segments[i].pos;
-    //         _segments[i].mesh = newMesh;
+    //         newMesh.transform.position = segments[i].pos;
+    //         segments[i].mesh = newMesh;
     //     }
     // }
     
@@ -173,22 +198,19 @@ public class IKLegs : MonoBehaviour
     void Update()
     {
         if (!simulate) return;
-        if (_segments[0] == null)
+        if (segments[0] == null)
             Debug.LogError($"leg named {gameObject.name} has no segments");
-        
-        for (int i = 0; i < legCount; i++)
-            minStepCooldownTimers[i] += Time.deltaTime;
-        
+
+        // Different logic for IKEdit vs normal mode
         if (ikEditMode)
         {
-            foreach (List<LegSegment> legSegments in _segments)
+            foreach (List<LegSegment> legSegments in segments)
                 StartCoroutine(MoveFabrikIK(legSegments));
         }
         else
         {
-            foreach (List<LegSegment> legSegments in _segments)
+            foreach (List<LegSegment> legSegments in segments)
             {
-                Debug.Log("surely ik mode is finished right??? " + legSegments[^1].ikMode);
                 if (legSegments[^1].ikMode)
                     StartCoroutine(MoveFabrikIK(legSegments));
                 else MoveLegFK(legSegments, true, false);
@@ -200,15 +222,15 @@ public class IKLegs : MonoBehaviour
     {
         bool isBaseAnchored = false;
         LegSegment pawSeg = legSegments[^1];
+        
         pawSeg.ikMode = false;
-        int legIndex = _segments.IndexOf(legSegments);
+        int legIndex = segments.IndexOf(legSegments);
         
         Vector3 startPawPos = pawSeg.pos;
-        Vector3 targetPawPos = stepEndPositions[legIndex].position;
         
-        for (float timer = 0; timer < minStepCooldown - .03f; timer += Time.deltaTime)
+        for (float timer = 0; timer < stepDuration; timer += Time.deltaTime)
         {
-            Vector3 currentPos = Lerp(startPawPos, targetPawPos, timer /  minStepCooldown);
+            Vector3 currentPos = Lerp(startPawPos, stepEndPositions[legIndex].position, timer /  stepDuration);
             legPaws[legIndex].position = currentPos;
             
             for (int depth = 0; depth < maxIKFabrikDepth; depth++)
@@ -220,12 +242,14 @@ public class IKLegs : MonoBehaviour
             yield return null;
         }
         
-        legPaws[legIndex].position = targetPawPos;
+        legPaws[legIndex].position = stepEndPositions[legIndex].position;
         for (int depth = 0; depth < maxIKFabrikDepth; depth++)
         {
             MoveLegFK(legSegments, isBaseAnchored, true);
             isBaseAnchored = !isBaseAnchored;
         }
+
+        pawSeg.takingStep = false;
     }
 
     /// <summary>
@@ -233,118 +257,118 @@ public class IKLegs : MonoBehaviour
     /// </summary>
     void MoveLegFK(List<LegSegment> legSegments, bool isBaseAnchored, bool executingFabrik)
     {
-        int legIndex = _segments.IndexOf(legSegments);
+        int legIndex = segments.IndexOf(legSegments);
         if (isBaseAnchored)
             legSegments[0].pos = legBases[legIndex].position;
         else
             legSegments[^1].pos = legPaws[legIndex].position;
         
-        DrawArrow.ForDebug(stepEndPositions[legIndex].position, legSegments[^1].pos - stepEndPositions[legIndex].position, Color.green);
-        DrawArrow.ForDebug(stepEndPositions[legIndex].position, stepBeginPositions[legIndex].position - stepEndPositions[legIndex].position, Color.green);
+        //DrawArrow.ForDebug(stepEndPositions[legIndex].position, legSegments[^1].pos - stepEndPositions[legIndex].position, Color.green);
+        //DrawArrow.ForDebug(stepEndPositions[legIndex].position, stepBeginPositions[legIndex].position - stepEndPositions[legIndex].position, Color.green);
         
         // Steps condition
-        if (!executingFabrik)
+        List<LegSegment> adjacentLeg = legIndex % 2 == 0 ? segments[legIndex + 1] : segments[legIndex - 1];
+        if (!executingFabrik && !adjacentLeg[^1].takingStep)
         {
-            // Instead of calculating angle, compare distance between endStepPos/pawPos and endStepPos/beginStepPos
-            Vector3 pawSeg = legSegments[^1].pos;
-            float pawDist = (pawSeg - stepEndPositions[legIndex].position).magnitude;
-            float maxPawDist = (stepBeginPositions[legIndex].position - stepEndPositions[legIndex].position).magnitude;
-            
-            // If leg stretched, take a step
-            if (pawDist > maxPawDist && minStepCooldownTimers[legIndex] >= minStepCooldown)
-            {
-                Debug.Log("made a step");
-                minStepCooldownTimers[legIndex] = 0;
-                legSegments[^1].ikMode = true;
-                // DOTween.Sequence()
-                //     .Append(DOTween.To(() => legPaws[legIndex].position, x => legPaws[legIndex].position = x, stepEndPositions[legIndex].position, .1f))
-                //     .OnComplete(() =>
-                //     {
-                //         legSegments[^1].ikMode = false;
-                //         Debug.Log("finished step hopefully");
-                //     });
-                return;
-            }
+            if (CheckForStep(legSegments)) return;
         }
         
-        // Circle constraint each segment
+        // Execute for each segment
         for (int i = isBaseAnchored ? 1 : segmentCountPerLeg - 2; isBaseAnchored ? i < segmentCountPerLeg: i >= 0; i += isBaseAnchored ? 1 : -1)
         {
+            if (!executingFabrik && legSegments[i] == legSegments[^1])
+                return;
+            
             LegSegment parentSeg = legSegments[isBaseAnchored ? i - 1 : i + 1];
             
+            // Circle constraint segment
             Vector3 posDiff = legSegments[i].pos - parentSeg.pos;
             Vector3 newPos = parentSeg.pos + posDiff.normalized * segmentDistance;
             
+            // Clamp angle if necessary
             bool angleCheckCondition = isBaseAnchored ? i > 1 : i < segmentCountPerLeg - 2;
             if (angleCheckCondition)
             {
-                LegSegment parentSeg2 = legSegments[isBaseAnchored ? i - 2 : i + 2];
-                
-                // Check neighboring segments and calculate angle
-                Vector3 v1 = parentSeg2.pos - parentSeg.pos;
-                Vector3 v2 = newPos - parentSeg.pos;
-                float angle = Vector3.SignedAngle(v1, v2, Vector3.up);
-
-            
-                // Clamp angle
-                if (Mathf.Abs(angle) < maxSegmentAngle)
-                    newPos = Quaternion.AngleAxis(maxSegmentAngle * Mathf.Sign(angle), Vector3.up) * v1 + parentSeg.pos;
-                
-                // Rotate legs depending on forward/backward
-                bool positiveAngle = Mathf.Sign(angle) < .01;
-                bool rotateLegSegment;
-                
-                if ((legSegments[i].forward && legSegments[i].mirrored) || (!legSegments[i].forward && !legSegments[i].mirrored))
-                    rotateLegSegment = isBaseAnchored && !positiveAngle || !isBaseAnchored && positiveAngle;
-                else
-                    rotateLegSegment = isBaseAnchored && positiveAngle || !isBaseAnchored && !positiveAngle;
-                
-                if (rotateLegSegment)
-                {
-                    // Step 1: calculate angle dif
-                    float deltaAngle = Vector3.SignedAngle((parentSeg.pos - newPos).normalized, (parentSeg2.pos - newPos).normalized, Vector3.up);
-                    parentSeg.pos = newPos + Quaternion.AngleAxis(deltaAngle * 2, Vector3.up) * (parentSeg.pos - newPos);
-                }
+                ClampAngle(legSegments, isBaseAnchored, newPos, i);
             }
             
             legSegments[i].pos = newPos;
             
             
-            //_segments[i].mesh.transform.position = newPos;
-            
-            // Rotate segment mesh
-            // float nextSegmentAngle = _segments[i - 1].mesh.transform.eulerAngles.y;
-            // Vector3 nextExtremity = Quaternion.AngleAxis(nextSegmentAngle - 90, Vector3.up) * Vector3.left * .5f + _segments[i - 1].pos;
-            // Vector3 lookAtPos = Lerp(_segments[i - 1].pos, nextExtremity, lookAtExtremityFactor);
-            //
-            // Vector3 deltaPos = lookAtPos - newPos;
-            // float meshAngle = Vector3.SignedAngle(Vector3.right, deltaPos, Vector3.up);
-            // _segments[i].mesh.transform.localEulerAngles = new Vector3(0,  meshAngle + 90, 0);
-            
-            // Scale to fill gaps
-            // float angleDiff = Vector3.Angle(_segments[i].mesh.transform.forward, _segments[i - 1].mesh.transform.forward);
-            // float scaleFactor = Mathf.Lerp(1, 1.35f, angleDiff / 45f);
-            // _segments[i].mesh.transform.localScale = new Vector3(_segments[i].mesh.transform.localScale.x, _segments[i].mesh.transform.localScale.y, .5f * scaleFactor);
+            //RotateMesh();
         }
-
-        // if (isBaseAnchored)
-        //     legPaws[legIndex].position = legSegments[^1].pos;
-        // else
-        //     legBases[legIndex].position = legSegments[0].pos;
-        
     }
 
+    void ClampAngle(List<LegSegment> legSegments, bool isBaseAnchored, Vector3 newPos, int i)
+    {
+        LegSegment parentSeg = legSegments[isBaseAnchored ? i - 1 : i + 1];
+        LegSegment parentSeg2 = legSegments[isBaseAnchored ? i - 2 : i + 2];
+                
+        // Check neighboring segments and calculate angle
+        Vector3 v1 = parentSeg2.pos - parentSeg.pos;
+        Vector3 v2 = newPos - parentSeg.pos;
+        float angle = Vector3.SignedAngle(v1, v2, Vector3.up);
+                
+        // Clamp angle
+        if (Mathf.Abs(angle) < maxSegmentAngle)
+            newPos = Quaternion.AngleAxis(maxSegmentAngle * Mathf.Sign(angle), Vector3.up) * v1 + parentSeg.pos;
+                
+        // Rotate legs depending on forward/backward
+        bool positiveAngle = Mathf.Sign(angle) < .01;
+        bool rotateLegSegment;
+                
+        if ((legSegments[i].forward && legSegments[i].mirrored) || (!legSegments[i].forward && !legSegments[i].mirrored))
+            rotateLegSegment = isBaseAnchored && !positiveAngle || !isBaseAnchored && positiveAngle;
+        else
+            rotateLegSegment = isBaseAnchored && positiveAngle || !isBaseAnchored && !positiveAngle;
+                
+        if (rotateLegSegment)
+        {
+            // Step 1: calculate angle diff
+            float deltaAngle = Vector3.SignedAngle((parentSeg.pos - newPos).normalized, (parentSeg2.pos - newPos).normalized, Vector3.up);
+            parentSeg.pos = newPos + Quaternion.AngleAxis(deltaAngle * 2, Vector3.up) * (parentSeg.pos - newPos);
+        }
+    }
 
-    // void RotateStepEndPos()
-    // {
-    //     SplineAnimate splineAnim = GetComponent<SplineAnimate>();
-    //     float time = splineAnim.NormalizedTime;
-    //     Vector3 tangent = splineAnim.Container.Splines[0].EvaluateTangent(time);
-    //     
-    //     float headAngle = Vector3.SignedAngle(Vector3.right, tangent, Vector3.up);
-    //     stepEndPosParent.transform.localEulerAngles = new Vector3(0, headAngle, 0);
-    // }
-    
+    bool CheckForStep(List<LegSegment> legSegments)
+    {
+        int legIndex = segments.IndexOf(legSegments);
+        
+        // Instead of calculating angle, compare distance between endStepPos/pawPos and endStepPos/beginStepPos
+        Vector3 pawSeg = legSegments[^1].pos;
+        float pawDist = (pawSeg - stepEndPositions[legIndex].position).magnitude;
+        float maxPawDist = (stepBeginPositions[legIndex].position - stepEndPositions[legIndex].position).magnitude;
+            
+        // If leg behind begin step pos, take a step towards end step pos
+        //bool condition1 = legIndex % 2 == 0 ? rightStepCooldownTimer >= minStepCooldown : leftStepCooldownTimer >= minStepCooldown;
+        if (pawDist > maxPawDist)
+        {
+            legSegments[^1].ikMode = true;
+            legSegments[^1].takingStep = true;
+            return true;
+        }
+
+        return false;
+    }
+
+    void RotateMesh()
+    {
+        //segments[i].mesh.transform.position = newPos;
+            
+        // Rotate segment mesh
+        // float nextSegmentAngle = segments[i - 1].mesh.transform.eulerAngles.y;
+        // Vector3 nextExtremity = Quaternion.AngleAxis(nextSegmentAngle - 90, Vector3.up) * Vector3.left * .5f + segments[i - 1].pos;
+        // Vector3 lookAtPos = Lerp(segments[i - 1].pos, nextExtremity, lookAtExtremityFactor);
+        //
+        // Vector3 deltaPos = lookAtPos - newPos;
+        // float meshAngle = Vector3.SignedAngle(Vector3.right, deltaPos, Vector3.up);
+        // segments[i].mesh.transform.localEulerAngles = new Vector3(0,  meshAngle + 90, 0);
+            
+        // Scale to fill gaps
+        // float angleDiff = Vector3.Angle(segments[i].mesh.transform.forward, segments[i - 1].mesh.transform.forward);
+        // float scaleFactor = Mathf.Lerp(1, 1.35f, angleDiff / 45f);
+        // segments[i].mesh.transform.localScale = new Vector3(segments[i].mesh.transform.localScale.x, segments[i].mesh.transform.localScale.y, .5f * scaleFactor);
+    }
     
     #endregion Looping
 
@@ -357,12 +381,12 @@ public class IKLegs : MonoBehaviour
     {
         if (!debugMode || !simulate) return;
 
-        foreach (List<LegSegment> legSegments in _segments)
+        foreach (List<LegSegment> legSegments in segments)
         {
             Gizmos.color = Color.blue;
-            Gizmos.DrawSphere(stepEndPositions[_segments.IndexOf(legSegments)].position, .3f);
+            Gizmos.DrawSphere(stepEndPositions[segments.IndexOf(legSegments)].position, .3f);
             Gizmos.color = Color.green;
-            Gizmos.DrawSphere(stepBeginPositions[_segments.IndexOf(legSegments)].position, .2f);
+            Gizmos.DrawSphere(stepBeginPositions[segments.IndexOf(legSegments)].position, .2f);
             foreach (LegSegment segment in legSegments)
             {
                 Gizmos.color = segmentColor;
@@ -381,4 +405,5 @@ public class LegSegment
     public bool forward;
     public bool mirrored;
     public bool ikMode;
+    public bool takingStep;
 }
