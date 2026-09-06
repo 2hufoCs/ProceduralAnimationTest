@@ -6,6 +6,8 @@ using System.Collections;
 using UnityEngine.Splines;
 using System;
 using DG.Tweening;
+using NUnit.Framework;
+using UnityEngine.UIElements;
 
 [ExecuteAlways]
 public class IKLegs : MonoBehaviour
@@ -15,7 +17,7 @@ public class IKLegs : MonoBehaviour
 
     [Header("Legs")] 
     [OnValueChanged(nameof(RecomputeLegs))] public int legCount;
-    [SerializeField, Range(1, 100), OnValueChanged(nameof(RecomputeLegs))] private int segmentCountPerLeg;
+    [SerializeField, UnityEngine.Range(1, 100), OnValueChanged(nameof(RecomputeLegs))] private int segmentCountPerLeg;
 
     [SerializeField] private List<bool> legDirections = new();
     [SerializeField] private List<Transform> stepEndPositions = new();
@@ -25,7 +27,7 @@ public class IKLegs : MonoBehaviour
     [Header("Segments")]
     [SerializeField, OnValueChanged(nameof(RecomputeLegs))] private float segmentDistance;
     [SerializeField] private float maxSegmentAngle;
-    [SerializeField, Range(0, 1)] private float lookAtExtremityFactor;
+    [SerializeField, UnityEngine.Range(0, 1)] private float lookAtExtremityFactor;
     
     [SerializeField, OnValueChanged(nameof(ReassignSegmentRadiuses))] private List<float> segmentRadiuses = new();
     public List<Transform> legBases = new();
@@ -34,17 +36,21 @@ public class IKLegs : MonoBehaviour
 
     public float stepDuration;
 
-    // [Header("Meshes")] 
-    // [SerializeField] private Transform meshParent;
-    // [SerializeField] private GameObject headMesh;
-    // [SerializeField] private GameObject bodyMesh;
-    // [SerializeField] private GameObject tailMesh;
+    [Header("Meshes")] 
+    [SerializeField] private Transform legMeshParent;
+    [SerializeField] private bool hasHumanoidLegs;
+
+    [SerializeField, ShowIf(nameof(hasHumanoidLegs))] private GameObject upperArmMesh;
+    [SerializeField, ShowIf(nameof(hasHumanoidLegs))] private GameObject forearmMesh;
+
+    [SerializeField, HideIf(nameof(hasHumanoidLegs))] private GameObject legSegmentMesh;
+    [SerializeField] private GameObject pawMesh;
+    [SerializeField] private GameObject elbowMesh;
+
 
     [Header("Debug")] 
-    //[SerializeField] private bool baseAnchored = true;
     [SerializeField] private bool debugMode;
     [SerializeField] private Color segmentColor;
-    [SerializeField] private Transform cubeTransform;
 
     public List<List<LegSegment>> segments = new();
     private Vector3 _previousFramePos;
@@ -80,13 +86,8 @@ public class IKLegs : MonoBehaviour
             }
         }
 
-        // ReconstructMeshes();
+        ReconstructMeshes();
         ReassignSegmentRadiuses();
-        
-        //Debug.Log("recomputed body");
-        
-        // foreach (List<LegSegment> legSegments in segments)
-        //     MoveLegFK(legSegments, true);
     }
 
     void ResizeLists()
@@ -127,34 +128,6 @@ public class IKLegs : MonoBehaviour
                 legPaws.Add(transform);
             else legPaws.Remove(legPaws[^1]);
         }
-
-        // stepBeginStartLocalPos.Clear();
-        // for (int i = 0; i < legCount; i++)
-        // {
-        //     // 1. Set parent to pivot
-        //     Transform t = stepBeginPositions[i];
-        //     Vector3 pos = t.position;
-        //     Debug.Log("position before removing: " + t.localPosition);
-        //     t.parent = legBases[i].parent;
-        //     
-        //     // 2. Store local position
-        //     t.position = pos;
-        //     //stepBeginStartLocalPos.Add(t.localPosition);
-        //     
-        //     // TODO: remove hardcoded values once this system work
-        //     Vector3 localPos = new Vector3((i % 2 == 0) ? -3 : 3, 0, -1.8f);
-        //     if (i >= 2) localPos.x *= 1.5f;
-        //     stepBeginStartLocalPos.Add(localPos);
-        //     t.localPosition = localPos;
-        //     Debug.Log("local position assigning pivot as parent: " + t.localPosition);
-        //     
-        //     // 3. Reset parent to snake transform
-        //     t.parent = transform;
-        //     //t.position = pos;
-        //     t.localRotation = Quaternion.identity;
-        //     t.localScale = Vector3.one;
-        //     Debug.Log("position after reassigning snake parent: " + t.localPosition);
-        // }
     }
 
     void ReassignSegmentRadiuses()
@@ -169,26 +142,71 @@ public class IKLegs : MonoBehaviour
         }
     }
     
-    // void ReconstructMeshes()
-    // {
-    //     // Destroy previous meshes (even in editor)
-    //     var tempList = meshParent.Cast<Transform>().ToList();
-    //     foreach(var child in tempList)
-    //     {
-    //         DestroyImmediate(child.gameObject);
-    //     }
-    //     
-    //     // Spawn new meshes
-    //     for (int i = 0; i < segmentCount; i++)
-    //     {
-    //         GameObject meshToInstantiate = i == 0 ? headMesh : i == segmentCount - 1 ? tailMesh: bodyMesh;
-    //         GameObject newMesh = Instantiate(meshToInstantiate, meshParent);
-    //         newMesh.name = i == 0 ? $"WormHead_{i}" : i == segmentCount - 1 ? $"WormTail_{i}" : $"WormBody_{i}";
-    //             
-    //         newMesh.transform.position = segments[i].pos;
-    //         segments[i].mesh = newMesh;
-    //     }
-    // }
+    [Button]
+    void ReconstructMeshes()
+    {
+        // Destroy previous meshes (even in editor)
+        var tempList = legMeshParent.Cast<Transform>().ToList();
+        foreach(var child in tempList)
+        {
+            foreach (var subChild in child.Cast<Transform>().ToList())
+                DestroyImmediate(subChild.gameObject);
+            DestroyImmediate(child.gameObject);
+        }
+        
+        // Spawn new meshes
+        for (int j = 0; j < legCount; j++)
+        {
+            // Fun way to spawn an empty object instead of using Instantiate
+            GameObject newLeg = new GameObject
+            {
+                transform =
+                {
+                    position = segments[j][0].pos,
+                    parent = legMeshParent
+                },
+                name = "Leg" + j
+            };
+
+            Transform parent = newLeg.transform;
+            
+            // Specific spawn for humanoid legs
+            if (hasHumanoidLegs)
+            {
+                if (segmentCountPerLeg != 3)
+                    Debug.LogError($"entity named {gameObject.name} has humanoid legs, yet it has {segmentCountPerLeg} segments per leg");
+                
+                GameObject upperArm = InitializeLegMesh(upperArmMesh, (segments[j][0].pos + segments[j][1].pos) / 2, Quaternion.identity, "UpperArm", parent, new Vector2Int(j, -1));
+                InitializeLegMesh(elbowMesh, segments[j][1].pos, Quaternion.identity, "Elbow", parent, new Vector2Int(j, 1));
+                GameObject forearm = InitializeLegMesh(forearmMesh, (segments[j][1].pos + segments[j][2].pos) / 2, Quaternion.identity, "Forearm", parent, new Vector2Int(j, -1));
+                InitializeLegMesh(pawMesh, segments[j][2].pos, Quaternion.identity, "Paw", parent, new Vector2Int(j, 2));
+
+                segments[j][0].inBetweenMesh = upperArm;
+                segments[j][1].inBetweenMesh = forearm;
+                continue;
+            }
+            
+            for (int i = 0; i < segmentCountPerLeg - 1; i++)
+            {
+                InitializeLegMesh(legSegmentMesh, segments[j][i].pos, Quaternion.identity, $"LegElbow{i}", parent, new Vector2Int(j, i));
+                GameObject segment = InitializeLegMesh(legSegmentMesh, (segments[j][i].pos + segments[j][i + 1].pos) / 2, Quaternion.identity, $"LegSegment{i}", parent, new Vector2Int(j,-1));
+                segments[j][i].inBetweenMesh = segment;
+            }
+            // Finally, add paw
+            InitializeLegMesh(pawMesh, segments[j][segmentCountPerLeg - 1].pos, Quaternion.identity, $"LegPaw", parent, new Vector2Int(j, segmentCountPerLeg - 1));
+        }
+    }
+
+    GameObject InitializeLegMesh(GameObject prefab, Vector3 pos, Quaternion rot, string legName, Transform parent, Vector2Int segIndex)
+    {
+        GameObject legPart = Instantiate(prefab, pos, rot, legMeshParent);
+        legPart.name = legName;
+        legPart.transform.parent = parent;
+        
+        if (segIndex.x < 0 || segIndex.y < 0) return legPart;
+        segments[segIndex.x][segIndex.y].mesh = legPart;
+        return legPart;
+    }
     
     #endregion Precomputed
     
@@ -268,7 +286,10 @@ public class IKLegs : MonoBehaviour
         
         // Steps condition
         List<LegSegment> adjacentLeg = legIndex % 2 == 0 ? segments[legIndex + 1] : segments[legIndex - 1];
-        if (!executingFabrik && !adjacentLeg[^1].takingStep)
+        List<LegSegment> nextLeg = legIndex % 4 <= 1 && legIndex < legCount - 2
+            ? segments[legIndex + 2]
+            : segments[legIndex - 2];
+        if (!executingFabrik && !adjacentLeg[^1].takingStep && !nextLeg[^1].takingStep)
         {
             if (CheckForStep(legSegments)) return;
         }
@@ -276,30 +297,35 @@ public class IKLegs : MonoBehaviour
         // Execute for each segment
         for (int i = isBaseAnchored ? 1 : segmentCountPerLeg - 2; isBaseAnchored ? i < segmentCountPerLeg: i >= 0; i += isBaseAnchored ? 1 : -1)
         {
-            if (!executingFabrik && legSegments[i] == legSegments[^1])
-                return;
-            
             LegSegment parentSeg = legSegments[isBaseAnchored ? i - 1 : i + 1];
             
             // Circle constraint segment
             Vector3 posDiff = legSegments[i].pos - parentSeg.pos;
+            
+            // if (!executingFabrik && legSegments[i] == legSegments[^1] && posDiff.magnitude < segmentDistance + .01f)
+            //     return;
+            
             Vector3 newPos = parentSeg.pos + posDiff.normalized * segmentDistance;
             
             // Clamp angle if necessary
             bool angleCheckCondition = isBaseAnchored ? i > 1 : i < segmentCountPerLeg - 2;
             if (angleCheckCondition)
-            {
                 ClampAngle(legSegments, isBaseAnchored, newPos, i);
-            }
             
             legSegments[i].pos = newPos;
-            
-            
-            //RotateMesh();
+            if (!executingFabrik)
+                RotateMesh(legIndex, i);
+        }
+        
+        // Don't rotate while executing IK
+        if (executingFabrik) return;
+        for (int i = 0; i < segmentCountPerLeg; i++)
+        {
+            RotateMesh(legIndex, i);
         }
     }
 
-    void ClampAngle(List<LegSegment> legSegments, bool isBaseAnchored, Vector3 newPos, int i)
+    float ClampAngle(List<LegSegment> legSegments, bool isBaseAnchored, Vector3 newPos, int i)
     {
         LegSegment parentSeg = legSegments[isBaseAnchored ? i - 1 : i + 1];
         LegSegment parentSeg2 = legSegments[isBaseAnchored ? i - 2 : i + 2];
@@ -328,6 +354,8 @@ public class IKLegs : MonoBehaviour
             float deltaAngle = Vector3.SignedAngle((parentSeg.pos - newPos).normalized, (parentSeg2.pos - newPos).normalized, Vector3.up);
             parentSeg.pos = newPos + Quaternion.AngleAxis(deltaAngle * 2, Vector3.up) * (parentSeg.pos - newPos);
         }
+
+        return angle;
     }
 
     bool CheckForStep(List<LegSegment> legSegments)
@@ -351,23 +379,42 @@ public class IKLegs : MonoBehaviour
         return false;
     }
 
-    void RotateMesh()
+    void RotateMesh(int legIndex, int segmentIndex)
     {
-        //segments[i].mesh.transform.position = newPos;
+        LegSegment segment = segments[legIndex][segmentIndex];
+        if (segment.mesh)
+            segment.mesh.transform.position = segment.pos;
+        
+        // In this case, it's a paw, so don't apply in between mesh logic
+        if (segmentIndex == segmentCountPerLeg - 1)
+        {
+            segment.mesh.transform.localEulerAngles = segments[legIndex][segmentIndex - 1].mesh.transform.eulerAngles;
+            return;
+        }
+        
+        LegSegment nextSegment = segments[legIndex][segmentIndex + 1];
+        
+        if (!segment.inBetweenMesh)
+            return;
             
-        // Rotate segment mesh
-        // float nextSegmentAngle = segments[i - 1].mesh.transform.eulerAngles.y;
-        // Vector3 nextExtremity = Quaternion.AngleAxis(nextSegmentAngle - 90, Vector3.up) * Vector3.left * .5f + segments[i - 1].pos;
-        // Vector3 lookAtPos = Lerp(segments[i - 1].pos, nextExtremity, lookAtExtremityFactor);
-        //
-        // Vector3 deltaPos = lookAtPos - newPos;
-        // float meshAngle = Vector3.SignedAngle(Vector3.right, deltaPos, Vector3.up);
-        // segments[i].mesh.transform.localEulerAngles = new Vector3(0,  meshAngle + 90, 0);
+        segment.inBetweenMesh.transform.position = (segment.pos + nextSegment.pos) / 2;
             
-        // Scale to fill gaps
-        // float angleDiff = Vector3.Angle(segments[i].mesh.transform.forward, segments[i - 1].mesh.transform.forward);
-        // float scaleFactor = Mathf.Lerp(1, 1.35f, angleDiff / 45f);
-        // segments[i].mesh.transform.localScale = new Vector3(segments[i].mesh.transform.localScale.x, segments[i].mesh.transform.localScale.y, .5f * scaleFactor);
+         // Rotate in between pos
+         float previousSegmentAngle = nextSegment.mesh ? nextSegment.mesh.transform.eulerAngles.y : 0;
+         Vector3 nextExtremity = Quaternion.AngleAxis(previousSegmentAngle - 90, Vector3.up) * Vector3.left * .5f + nextSegment.pos;
+         Vector3 lookAtPos = Lerp(nextSegment.pos, nextExtremity, lookAtExtremityFactor);
+        
+         Vector3 deltaPos = lookAtPos - segment.inBetweenMesh.transform.position;
+         DrawArrow.ForDebug(segment.inBetweenMesh.transform.position + Vector3.up, deltaPos + Vector3.up, Color.crimson);
+         
+         float meshAngle = Vector3.SignedAngle(Vector3.right, deltaPos, Vector3.up);
+         segment.inBetweenMesh.transform.localEulerAngles = new Vector3(hasHumanoidLegs ? -90 : 0,  meshAngle, 0);
+         if (segment.mesh) segment.mesh.transform.localEulerAngles = segment.inBetweenMesh.transform.localEulerAngles;
+            
+         // Scale to fill gaps
+         // float angleDiff = Vector3.Angle(segment.mesh.transform.forward, previousSegment.mesh ? previousSegment.mesh.transform.forward : Vector3.right);
+         // float scaleFactor = Mathf.Lerp(1, 1.35f, angleDiff / 45f);
+         // segment.mesh.transform.localScale = new Vector3(segment.mesh.transform.localScale.x, segment.mesh.transform.localScale.y, .5f * scaleFactor);
     }
     
     #endregion Looping
@@ -383,10 +430,10 @@ public class IKLegs : MonoBehaviour
 
         foreach (List<LegSegment> legSegments in segments)
         {
-            Gizmos.color = Color.blue;
-            Gizmos.DrawSphere(stepEndPositions[segments.IndexOf(legSegments)].position, .3f);
-            Gizmos.color = Color.green;
-            Gizmos.DrawSphere(stepBeginPositions[segments.IndexOf(legSegments)].position, .2f);
+            // Gizmos.color = Color.blue;
+            // Gizmos.DrawSphere(stepEndPositions[segments.IndexOf(legSegments)].position, .3f);
+            // Gizmos.color = Color.green;
+            // Gizmos.DrawSphere(stepBeginPositions[segments.IndexOf(legSegments)].position, .2f);
             foreach (LegSegment segment in legSegments)
             {
                 Gizmos.color = segmentColor;
@@ -401,6 +448,8 @@ public class LegSegment
 {
     public Vector3 pos;
     public float radius;
+    public GameObject mesh;
+    public GameObject inBetweenMesh;
     
     public bool forward;
     public bool mirrored;

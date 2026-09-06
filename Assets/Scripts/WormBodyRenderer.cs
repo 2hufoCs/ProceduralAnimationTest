@@ -21,6 +21,7 @@ public class WormBodyRenderer : MonoBehaviour
     [SerializeField, Range(0, 1)] private float lookAtExtremityFactor;
 
     [Header("Torque")] 
+    [SerializeField] private bool useTorque;
     [SerializeField] private float torqueAmount;
     [SerializeField, Range(0.1f, 1)] private float torqueTransferCutoff;
     [SerializeField] private int maxTorqueSegments;
@@ -130,7 +131,7 @@ public class WormBodyRenderer : MonoBehaviour
                 {
                     child.parent = newMesh.transform;
                     
-                    child.localPosition = Vector3.zero;
+                    child.localPosition = Vector3.up * .5f;
                     child.localRotation = Quaternion.identity;
                     child.localScale = Vector3.one;
                 }
@@ -194,30 +195,35 @@ public class WormBodyRenderer : MonoBehaviour
             _segments[i].pos = newPos;
             _segments[i].mesh.transform.position = newPos;
 
-            // Apply torque if segment has an associated leg taking a step
-            if (_hasLegs)
+
+            
+            RotateMesh(_segments[i].pos, i);
+        }
+        
+        // Reiterate again for torque check (must be performed after all circle and angle constraints)
+        if (_hasLegs && useTorque)
+        {
+            for (int i = 1; i < segmentCount; i++)
             {
+                // Apply torque if segment has an associated leg taking a step
                 for (int j = 0; j < _legs.legCount; j++)
                 {
                     if (_legs.legBases[j].parent.parent == _segments[i].mesh.transform &&
                         _legs.segments[j][^1].takingStep)
                     {
-                        ApplyTorque(i, newPos, j);
+                        ApplyTorque(i, _segments[i].pos, j);
                         break;
                     }
                 }
             }
-            
-            RotateMesh(_segments[i].pos, i);
         }
+
     }
 
     void ApplyTorque(int segmentIndex, Vector3 initialPos, int legIndex, float forceCoef = 1, int depth = 0)
     {
-        if (depth >= maxTorqueSegments) return;
         
-        if (legIndex == 0)
-            Debug.Log($"now rotating segment n°{segmentIndex}, with strength {forceCoef}");
+        if (depth >= maxTorqueSegments) return;
         
         // Get torque 
         bool rotateClockwise = legIndex % 2 == 0;
