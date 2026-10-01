@@ -176,7 +176,6 @@ public class IKLegs : MonoBehaviour
                 if (segmentCountPerLeg != 3)
                     Debug.LogError($"entity named {gameObject.name} has humanoid legs, yet it has {segmentCountPerLeg} segments per leg");
                 
-                InitializeLegMesh(elbowMesh, segments[j][0].pos, Quaternion.identity, "Shoulder", parent, new Vector2Int(j, 0));
                 GameObject upperArm = InitializeLegMesh(upperArmMesh, (segments[j][0].pos + segments[j][1].pos) / 2, Quaternion.identity, "UpperArm", parent, new Vector2Int(j, -1));
                 InitializeLegMesh(elbowMesh, segments[j][1].pos, Quaternion.identity, "Elbow", parent, new Vector2Int(j, 1));
                 GameObject forearm = InitializeLegMesh(forearmMesh, (segments[j][1].pos + segments[j][2].pos) / 2, Quaternion.identity, "Forearm", parent, new Vector2Int(j, -1));
@@ -314,20 +313,16 @@ public class IKLegs : MonoBehaviour
                 ClampAngle(legSegments, isBaseAnchored, newPos, i);
             
             legSegments[i].pos = newPos;
-/*
             if (!executingFabrik)
                 RotateMesh(legIndex, i);
-*/
         }
         
         // Don't rotate while executing IK
-
         if (executingFabrik) return;
         for (int i = 0; i < segmentCountPerLeg; i++)
         {
             RotateMesh(legIndex, i);
         }
-
     }
 
     float ClampAngle(List<LegSegment> legSegments, bool isBaseAnchored, Vector3 newPos, int i)
@@ -398,14 +393,16 @@ public class IKLegs : MonoBehaviour
         }
         
         LegSegment nextSegment = segments[legIndex][segmentIndex + 1];
-
+        
         if (!segment.inBetweenMesh)
             return;
             
         segment.inBetweenMesh.transform.position = (segment.pos + nextSegment.pos) / 2;
             
          // Rotate in between pos
-         Vector3 lookAtPos = Lerp(nextSegment.pos, segment.inBetweenMesh.transform.position, lookAtExtremityFactor);
+         float previousSegmentAngle = nextSegment.mesh ? nextSegment.mesh.transform.eulerAngles.y : 0;
+         Vector3 nextExtremity = Quaternion.AngleAxis(previousSegmentAngle - 90, Vector3.up) * Vector3.left * .5f + nextSegment.pos;
+         Vector3 lookAtPos = Lerp(nextSegment.pos, nextExtremity, lookAtExtremityFactor);
         
          Vector3 deltaPos = lookAtPos - segment.inBetweenMesh.transform.position;
          DrawArrow.ForDebug(segment.inBetweenMesh.transform.position + Vector3.up, deltaPos + Vector3.up, Color.crimson);
@@ -413,6 +410,11 @@ public class IKLegs : MonoBehaviour
          float meshAngle = Vector3.SignedAngle(Vector3.right, deltaPos, Vector3.up);
          segment.inBetweenMesh.transform.localEulerAngles = new Vector3(hasHumanoidLegs ? -90 : 0,  meshAngle, 0);
          if (segment.mesh) segment.mesh.transform.localEulerAngles = segment.inBetweenMesh.transform.localEulerAngles;
+            
+         // Scale to fill gaps
+         // float angleDiff = Vector3.Angle(segment.mesh.transform.forward, previousSegment.mesh ? previousSegment.mesh.transform.forward : Vector3.right);
+         // float scaleFactor = Mathf.Lerp(1, 1.35f, angleDiff / 45f);
+         // segment.mesh.transform.localScale = new Vector3(segment.mesh.transform.localScale.x, segment.mesh.transform.localScale.y, .5f * scaleFactor);
     }
     
     #endregion Looping
@@ -428,6 +430,10 @@ public class IKLegs : MonoBehaviour
 
         foreach (List<LegSegment> legSegments in segments)
         {
+            // Gizmos.color = Color.blue;
+            // Gizmos.DrawSphere(stepEndPositions[segments.IndexOf(legSegments)].position, .3f);
+            // Gizmos.color = Color.green;
+            // Gizmos.DrawSphere(stepBeginPositions[segments.IndexOf(legSegments)].position, .2f);
             foreach (LegSegment segment in legSegments)
             {
                 Gizmos.color = segmentColor;
